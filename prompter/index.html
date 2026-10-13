@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Horizon Prompter</title>
+<style>
+/* Layout: one dark screen, the script scrolls, the current line sits on a fixed reading band at 38% height. */
+:root{
+  --bg:#0b0d12; --fg:#e8e6df; --dim:#5d6270; --done:#8a8f9c;
+  --accent:#ffd54a; --accent-ink:#1a1200; --aside:#9fb4ff; --band:rgba(255,213,74,.07);
+  --font:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --size:34px; --mark:38vh;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);-webkit-text-size-adjust:100%;overscroll-behavior:none}
+#top{position:fixed;left:0;right:0;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;background:linear-gradient(var(--bg) 70%,transparent);font-size:14px}
+#top .sp{flex:1}
+button{font:inherit;border:1px solid #2a2e3a;background:#161922;color:var(--fg);border-radius:8px;padding:8px 14px;min-height:40px}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#mic.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+#mic.err{background:#5a1f1f;border-color:#7a2a2a}
+#state{color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+#heard{position:fixed;left:16px;right:16px;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:5;color:var(--dim);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+#band{position:fixed;left:0;right:0;top:calc(var(--mark) - 0.75em);height:1.5em;font-size:var(--size);background:var(--band);border-top:1px solid rgba(255,213,74,.25);border-bottom:1px solid rgba(255,213,74,.25);pointer-events:none;z-index:1}
+#scroll{position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:var(--mark) 24px 80vh;scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){#scroll{scroll-behavior:auto}}
+.slide{margin:0 auto 1.6em;max-width:28em;font-size:var(--size);line-height:1.45}
+.hd{font-size:.42em;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:2.2em 0 .9em;font-weight:700}
+.hd small{color:var(--dim);font-weight:400;margin-left:1em;letter-spacing:0}
+p{margin:0 0 .75em;text-wrap:pretty}
+p.aside{color:var(--aside);font-size:.8em;border-left:3px solid #2b3550;padding-left:.7em;opacity:.9}
+p.aside::before{content:"ASIDE · ";font-size:.7em;letter-spacing:.1em;color:var(--dim)}
+.w{transition:color .15s}
+.w.done{color:var(--done)}
+.w.cur{color:var(--accent);font-weight:700}
+.w.k{text-decoration:underline;text-decoration-color:rgba(255,213,74,.5);text-underline-offset:.18em}
+.w.done.k{text-decoration-color:transparent}
+#help{position:fixed;inset:0;z-index:9;background:rgba(11,13,18,.96);padding:24px;display:flex;flex-direction:column;justify-content:center;gap:14px;font-size:18px;max-width:none}
+#help h1{font-size:28px;margin:0 0 6px}
+#help p{color:#b9bcc6;max-width:34em}
+#help button{align-self:flex-start;font-size:18px;padding:12px 22px;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+#help .n{color:var(--dim);font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+#sz{width:120px}
+</style>
+</head>
+<body>
+<div id="help">
+  <h1>Horizon Prompter</h1>
+  <p>Le micro écoute en anglais. Le texte avance sur tes mots. La ligne en cours est dans la bande jaune. Si tu sautes un aside, le texte suit quand même.</p>
+  <p>Tu peux aussi faire défiler au doigt, ou toucher un mot pour repartir de là.</p>
+  <button id="start">Démarrer le micro</button>
+  <p class="n">Safari ou Chrome. Autorise le micro quand la tablette le demande. Garde l'écran allumé.</p>
+</div>
+<div id="top">
+  <button id="mic">Micro</button>
+  <span id="state">prêt</span>
+  <span class="sp"></span>
+  <button id="minus" aria-label="Texte plus petit">A−</button>
+  <button id="plus" aria-label="Texte plus grand">A+</button>
+  <button id="reset">Début</button>
+</div>
+<div id="band"></div>
+<div id="scroll"><div id="doc"></div></div>
+<div id="heard"></div>
+<script>
+const DATA=[{"n": 17, "title": "Section 02", "time": "~10 s", "say": ["Now, part two. Why we use Octave Alto inside Horizon."], "aside": null, "hl": ["part two"]}, {"n": 18, "title": "The rendering challenge", "time": "~90 s", "say": ["Let me start with our challenge.", "Horizon monitors tens of thousands of kilometres of pipelines. That is hundreds of thousands of images. And the alerts are live: a few minutes after the image.", "All of this must function in a web browser. Our users are pipeline engineers and field teams. They are not map experts. So the map must be rapid, precise, and simple.", "Octave Alto Browser gives us this. Defence and infrastructure companies already use it. It has the performance of a desktop application, in the browser. 2D, 3D and time, in one engine. And now with Web G-P-U."], "aside": "Web G-P-U is a new technology. The browser uses the graphic card directly. Result: more data on screen, and a fluid experience.", "hl": ["tens of thousands of kilometres", "a few minutes", "web browser", "rapid, precise, and simple", "Octave Alto Browser", "Web G-P-U"]}, {"n": 19, "title": "Architecture: Horizon is the core", "time": "~90 s", "say": ["This slide presents our architecture. The key idea: Horizon is the core, and it is constructed in layers.", "Each layer has one function. And each layer can change, without impact on the others.", "In the centre, the data chain. We control it: acquisition, analysis, detection, decision. This is Horizon. This is our core.", "On top, the front end. It is the final layer. It is what people see. Today, this is Alto Browser.", "With this architecture, no component can block our data. Not even the component we prefer.", "So Horizon does not depend on Alto Browser. We could change the front end. We don't. We keep it because it serves our users. That is why our choice has value."], "aside": "Imagine a building. You can change the roof without touching the foundations. Our foundation is the data. The front end is the top.", "hl": ["Horizon is the core", "constructed in layers", "each layer can change", "front end", "final layer", "We could change the front end. We don't."]}, {"n": 20, "title": "One platform. Any vector. Any application.", "time": "~90 s", "say": ["Here is the platform. In the centre, Horizon. Horizon is the core.", "On the left, the vectors. They deliver the data: the plane with Vaynor, and satellite. The drone is next. We are still in validation. Whatever the vector, the data enters the same Horizon pipeline.", "Then, the applications. Each application is designed for one detection, and to create value. T-P-I. Right of way. Vegetation. And also applications from other companies.", "And finally, the front end. The final layer. The one people see. So it must respond to needs, not to a technology. Our users need one clear map. Today, Alto Browser gives us this.", "So a new vector is just a new input. A new application is a new brick. And the front end stays concentrated on the user.", "If you develop software, this is where you can connect."], "aside": "A vector is the carrier of the sensor: plane, satellite or drone. Not the GIS data type. And we select the front end for the needs of the user, not for the technology.", "hl": ["Horizon is the core", "vectors", "one detection", "create value", "final layer", "needs, not to a technology", "connect"]}, {"n": 21, "title": "One map", "time": "~90 s", "say": ["Now, I will show you why we made this choice. Three examples from Horizon.", "This is one single map.", "On the left, the top view: our 10 cm plane images and the risk zones. One click, and the analyst passes to the 3D terrain.", "Same session. Same layers. Same data. Nothing reloads.", "Today, 2D or 3D is not an architecture decision. It is just a camera setting. Alto Browser changes the view live, and everything stays loaded."], "aside": "Before, 2D and 3D were two different applications. The user had to change, wait, and lose the context. Here, the analyst keeps the context, and decides faster.", "hl": ["why we made this choice", "Three examples", "one single map", "One click", "Nothing reloads", "just a camera setting"]}, {"n": 22, "title": "Stack anything. Reproject nothing.", "time": "~100 s", "say": ["Second example. This one is for the data people.", "Look at the layers. Plane images, satellite images, the pipeline route, the security zones, the detections. Each one has its own coordinate system.", "We never transform them in advance. No conversion. No pre-processing. Alto Browser does the transformation in the browser, with precision.", "Here, the image is at zero opacity. You see only the vector data. And it stays on the terrain. It follows the relief exactly."], "aside": "The classic method: convert all files to one format first. It takes time and storage, and it creates copies. Here, we conserve the original data. We convert only at display. Less work, less storage.", "hl": ["Second example", "its own coordinate system", "No conversion", "with precision", "zero opacity"]}, {"n": 23, "title": "One dataset. Many views.", "time": "~100 s", "say": ["Third example. One dataset, many views.", "This is one satellite image. Three views: natural colour, false colour, and N-D-V-I.", "We store the data one time. We never modify it. In Alto Browser, the views are display layers. We change them live. We never re-process the data.", "I come from medical imaging, so I like this comparison. In a scan, the anatomy is in grey, and the activity is in colour. We do the same on the right of way. The natural image in grey gives the context. N-D-V-I in colour gives the information. And we adjust the contrast live, like a doctor with a scan."], "aside": "R-G-B is what the eye sees. False colour uses infrared: vegetation appears in red, easy to identify. N-D-V-I indicates if the vegetation is healthy. Useful near a pipeline.", "hl": ["Third example", "Three views", "one time", "change them live", "like a doctor with a scan"]}, {"n": 24, "title": "We chose for where we are going", "time": "~90 s", "say": ["One more reason for our choice. We did not choose only for where we are today. We chose because we know where we are going.", "Today, Horizon shows plane images at 10 cm, satellite images, and vectors: pipelines, risk zones, detections.", "Tomorrow, we go further. Drones, ground sensors, partner data, official registers. And time: every pass, every version.", "We do not know every detail. But we know the direction. So we need a front end that can follow us. The display must never be the limit.", "This is the real reason. We did not choose a viewer for today. We chose one for tomorrow."], "aside": "Ground sensors detect vibrations along the pipeline: excavation, machines. So an alert from the ground can appear on the same map as the image from the sky.", "hl": ["where we are going", "Tomorrow", "we know the direction", "must never be the limit", "for tomorrow"]}, {"n": 25, "title": "Build versus build on", "time": "~80 s", "say": ["Last question of this part: build, or build on?", "If we build it ourselves: years of development on display technology. A team outside our core business. And we lose time. Our competitors advance faster.", "If we build on Octave Alto: production in months, not years. Our energy on detection and decision. And a proven engine that continues to improve.", "For a young company, the most limited resource is focus. A map engine would take all of it."], "aside": "We are a small team. An engineer on a display engine is not on detection. And detection is what our clients pay for.", "hl": ["build, or build on?", "years of development", "months, not years", "focus"]}, {"n": 33, "title": "Roadmap", "time": "~80 s", "say": ["This is only the beginning. Here is our roadmap.", "3D: 3D objects along the pipeline, not only the terrain.", "Time: the past, and also the future. With the past, we replay the evolution of a site. With the future, we become proactive: we see a risk coming, and we act before.", "Fusion: several sensors on the same map.", "Modules: new modules. For example, vegetation, and new constructions. Next slide.", "Sources: ground sensors, official registers, partner data.", "We are only at the start with Octave Alto. Horizon is modular. Each use case is a new brick. And new data enters the same pipeline. Our data, your data, or data from someone else."], "aside": "Replay shows what happened. With the history of a site, we can also see a tendency, and alert before an incident. From reaction to anticipation.", "hl": ["3D:", "Time:", "the past", "the future", "proactive", "Fusion:", "Modules:", "Sources:", "new brick"]}, {"n": 34, "title": "Next step: what comes too close", "time": "~80 s", "say": ["Our first next step: what comes too close to the pipeline. On the slide: \"encroachment management\". In simple terms: we observe what grows, or what is constructed, near the pipeline.", "First, vegetation. We detect trees and bushes that enter the right of way. Too close to the pipe, they are a risk. And we verify that the clearance work is done, as in the contract.", "Second, urbanisation. We detect new constructions near the pipeline. And we see when the population increases. In case of incident, these people are in danger. The operator must know.", "Same method as before. The plane flies, the AI detects, an expert validates, the operator acts."], "aside": "Why vegetation? Roots can damage a pipe, and vegetation blocks the access for the teams. Why urbanisation? A pipeline was constructed far from houses. Years later, the city arrives.", "hl": ["what comes too close", "vegetation", "urbanisation", "clearance work", "operator must know"]}, {"n": 35, "title": "Next step: a basemap as ground truth", "time": "~100 s", "say": ["Our second next step: the basemap. Here is the problem.", "Every pass brings new data: many passes, many versions, many layers. Impossible to look at all of them. And showing everything has no more value.", "So we construct a basemap with all the information. It is our ground truth: one map we can trust. It updates itself with every pass: only the tiles under the plane change. And it conserves every version in time.", "But we do not hide the data. You can always access the data behind the map.", "We think this is possible with Alto Browser and Alto Server, or with other Octave products. Let's design it together.", "Three questions for Octave: can we update only some tiles? Can we conserve every version in time? Can we run it on our own cloud, with the same pay-as-we-grow model?"], "aside": "Ground truth means the reference we trust. Instead of many passes one by one, one map always up to date. The data is still there when you need to verify.", "hl": ["Impossible to look at all of them", "ground truth", "updates itself", "do not hide the data", "Alto Browser", "Alto Server", "other Octave products", "Three questions"]}];
+const norm=s=>s.toLowerCase().replace(/[’']/g,"").replace(/-/g," ").replace(/[^a-z0-9 ]+/g," ").split(/\s+/).filter(Boolean);
+const alias={"gpu":"g p u","webgpu":"web g p u","ndvi":"n d v i","rgb":"r g b","tpi":"t p i","2d":"two d","3d":"three d","10":"ten","cm":"centimetres","centimeters":"centimetres","kilometers":"kilometres","colors":"colours","color":"colour","defense":"defence","alto":"alto","octave":"octave","luciad":"luciad"};
+function tokens(s){return norm(s).flatMap(w=>(alias[w]||w).split(" "));}
+
+// Build DOM, word list
+const doc=document.getElementById('doc');
+const words=[]; // {el, tok}
+DATA.forEach(sl=>{
+  const d=document.createElement('div'); d.className='slide';
+  const h=document.createElement('div'); h.className='hd'; h.innerHTML=`Slide ${sl.n} <small>${sl.time}</small>`; d.appendChild(h);
+  const paras=sl.say.map(t=>({t,aside:false})); if(sl.aside) paras.push({t:sl.aside,aside:true});
+  paras.forEach(({t,aside})=>{
+    const p=document.createElement('p'); if(aside) p.className='aside';
+    const local=[]; // {span,toks}
+    t.split(/(\s+)/).forEach(piece=>{
+      if(/^\s+$/.test(piece)){p.appendChild(document.createTextNode(' '));return;}
+      const tk=tokens(piece); const span=document.createElement('span'); span.className='w'; span.textContent=piece;
+      if(tk.length){span.dataset.i=words.length; tk.forEach(x=>words.push({el:span,tok:x})); local.push({span,toks:tk});}
+      else span.classList.add('punct');
+      p.appendChild(span);
+    });
+    if(!aside){
+      const flat=[]; local.forEach((l,li)=>l.toks.forEach(()=>flat.push(li)));
+      const ptoks=local.flatMap(l=>l.toks);
+      (sl.hl||[]).forEach(k=>{const kt=tokens(k); if(!kt.length) return;
+        for(let i=0;i+kt.length<=ptoks.length;i++){let ok=true; for(let j=0;j<kt.length;j++){if(ptoks[i+j]!==kt[j]){ok=false;break;}}
+          if(ok){for(let j=0;j<kt.length;j++) local[flat[i+j]].span.classList.add('k');}}
+      });
+    }
+    d.appendChild(p);
+  });
+  doc.appendChild(d);
+});
+const N=words.length;
+let pos=0; // index of next unread token
+const scroller=document.getElementById('scroll');
+function paint(from,to){
+  for(let i=from;i<to;i++){const w=words[i]; if(!w) continue; w.el.classList.toggle('done',i<pos); w.el.classList.remove('cur');}
+}
+function setPos(p,scroll=true){
+  const old=pos; pos=Math.max(0,Math.min(N,p));
+  paint(Math.min(old,pos)-2,Math.max(old,pos)+2);
+  const cur=words[Math.min(pos,N-1)]; if(cur){cur.el.classList.add('cur'); if(scroll) centre(cur.el);}
+  document.getElementById('state').textContent=Math.round(100*pos/N)+'%';
+}
+function centre(el){
+  const mark=window.innerHeight*0.38;
+  const r=el.getBoundingClientRect();
+  const delta=r.top+r.height/2-mark;
+  if(Math.abs(delta)>8) scroller.scrollBy({top:delta,behavior:'smooth'});
+}
+// tap a word to jump
+doc.addEventListener('click',e=>{const s=e.target.closest('.w[data-i]'); if(s){setPos(+s.dataset.i);}});
+
+// Matching: find recognized tail in window ahead of pos
+const AHEAD=90, BACK=6;
+function match(heardToks){
+  if(!heardToks.length) return;
+  const tail=heardToks.slice(-10);
+  let best=null;
+  const lo=Math.max(0,pos-BACK), hi=Math.min(N,pos+AHEAD);
+  // try to align tail end at every position j in [lo,hi); score = matched count in last k tokens, allowing small gaps
+  for(let j=lo;j<=hi;j++){
+    let score=0, ti=tail.length-1, wi=j-1, miss=0;
+    while(ti>=0 && wi>=0 && miss<=2){
+      if(tail[ti]===words[wi].tok){score++;ti--;wi--;}
+      else if(wi-1>=0 && tail[ti]===words[wi-1].tok){miss++;wi--;}
+      else if(ti-1>=0 && tail[ti-1]===words[wi].tok){miss++;ti--;}
+      else {miss++;ti--;wi--;}
+    }
+    const dist=Math.abs(j-pos);
+    const s=score - dist*0.02;
+    if(score>=2 && (!best || s>best.s)) best={j,s,score};
+  }
+  if(best){
+    const jump=best.j-pos;
+    if(jump>=0 && (best.score>=2 || jump<=3)) setPos(best.j);
+    else if(jump<0 && jump>=-BACK && best.score>=4) setPos(best.j);
+  }
+}
+
+// Speech
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const micBtn=document.getElementById('mic'), heardEl=document.getElementById('heard'), stateEl=document.getElementById('state');
+let rec=null, listening=false, lastFinalLen=0, sessionToks=[];
+function startRec(){
+  if(!SR){micBtn.classList.add('err');micBtn.textContent='Pas de reconnaissance';return;}
+  rec=new SR(); rec.lang='en-US'; rec.continuous=true; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.onresult=e=>{
+    let interim='', finals='';
+    for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i]; if(r.isFinal) finals+=r[0].transcript+' '; else interim+=r[0].transcript+' ';}
+    const txt=(finals+interim).trim();
+    heardEl.textContent='‎'+txt.slice(-120);
+    const toks=tokens(txt);
+    match(toks);
+  };
+  rec.onerror=e=>{ if(e.error==='not-allowed'||e.error==='service-not-allowed'){listening=false;micBtn.classList.remove('on');micBtn.classList.add('err');micBtn.textContent='Micro refusé';} };
+  rec.onend=()=>{ if(listening){ try{rec.start();}catch(_){setTimeout(()=>{try{rec.start()}catch(e){}},300);} } };
+  try{rec.start(); listening=true; micBtn.classList.add('on'); micBtn.textContent='Micro ON';}catch(e){}
+}
+function stopRec(){listening=false; if(rec){try{rec.stop()}catch(e){}} micBtn.classList.remove('on'); micBtn.textContent='Micro';}
+micBtn.onclick=()=>listening?stopRec():startRec();
+document.getElementById('start').onclick=()=>{document.getElementById('help').hidden=true; startRec(); wake();};
+document.getElementById('reset').onclick=()=>{paint(0,N); setPos(0);};
+const root=document.documentElement; let size=34;
+try{size=+localStorage.getItem('hp-size')||34;}catch(e){}
+root.style.setProperty('--size',size+'px');
+function setSize(s){size=Math.max(20,Math.min(60,s)); root.style.setProperty('--size',size+'px'); try{localStorage.setItem('hp-size',size)}catch(e){} setPos(pos);}
+document.getElementById('plus').onclick=()=>setSize(size+3);
+document.getElementById('minus').onclick=()=>setSize(size-3);
+async function wake(){try{if(navigator.wakeLock){await navigator.wakeLock.request('screen');}}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden) wake();});
+setPos(0);
+</script>
+</body>
+</html>
